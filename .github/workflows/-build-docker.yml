@@ -1,0 +1,131 @@
+name: "Build Docker"
+
+on:
+  workflow_call:
+    inputs:
+      tagTemplate:
+        required: true
+        type: string
+      shouldLoginDockerHub:
+        required: true
+        type: boolean
+      shouldLoginGithub:
+        required: true
+        type: boolean
+      dockerfile:
+        required: true
+        type: string
+      push:
+        required: true
+        type: boolean
+      imageName:
+        required: true
+        type: string
+      workerImageName:
+        required: true
+        type: string
+
+jobs:
+  build:
+    name: Build Docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 512
+          swap-size-mb: 1024
+          remove-dotnet: 'true' # will release about 17GB if you don't need .NET
+          remove-haskell: 'true' # will release about 2.7GB if you don't need haskell
+          remove-android: 'true' # will release about 11 GB if you don't need Android
+          remove-codeql: 'true' # will release about 5.4GB if you don't need CodeQL
+          remove-docker-images: 'true' # will free about 3GB by clearing out some pre cached images
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Get current date
+        run: echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >>"$GITHUB_ENV"
+
+      - name: Build image tag name
+        id: image_tag
+        run: |
+          BRANCH_NAME="${GITHUB_REF##*/}"
+          TAG="${{ inputs.tagTemplate }}"
+          echo "Tag name: ${TAG}"
+          MAIN_TAG=()
+          WORKER_TAG=()
+          if [[ "${{inputs.shouldLoginGithub}}" == "true" ]]; then
+              MAIN_TAG+=("ghcr.io/oxsecurity/${{ inputs.imageName }}:${TAG}")
+              WORKER_TAG+=("ghcr.io/oxsecurity/${{ inputs.workerImageName }}:${TAG}")
+          fi
+          if [[ "${{inputs.shouldLoginDockerHub}}" == "true" ]]; then
+              MAIN_TAG+=("oxsecurity/${{ inputs.imageName }}:${TAG}")
+              WORKER_TAG+=("oxsecurity/${{ inputs.workerImageName }}:${TAG}")
+          fi
+          echo "tag=${MAIN_TAG}" >>"$GITHUB_OUTPUT"
+          echo "workerTag=${WORKER_TAG}" >>"$GITHUB_OUTPUT"
+
+      - name: Login to Docker Hub
+        if: ${{ inputs.shouldLoginDockerHub }}
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+        
+      - name: Login to GitHub Container Registry
+        if: ${{ inputs.shouldLoginGithub }}
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Image
+        uses: docker/build-push-action@v4
+        with:
+          file: ${{ inputs.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            BUILD_DATE=${{ env.BUILD_DATE }}
+            BUILD_REVISION=${{ github.sha }}
+            BUILD_VERSION=alpha
+          load: false
+          push: ${{ inputs.push }}
+          outputs: ${{ (!inputs.push && 'type=oci,dest=image.tar') || '' }}
+
+          secrets: |
+            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          tags: ${{ steps.image_tag.outputs.tag }}
+
+      - name: Build Worker Image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: Dockerfile-worker
+          platforms: linux/amd64
+          build-args: |
+            MEGALINTER_BASE_IMAGE=ghcr.io/oxsecurity/megalinter-${{ matrix.flavor }}:alpha
+            BUILD_DATE=${{ env.BUILD_DATE }}
+            BUILD_REVISION=${{ github.sha }}
+            BUILD_VERSION=alpha
+          load: false
+          push: ${{ inputs.push }}
+
+          secrets: |
+            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          tags: ${{ steps.image_tag.outputs.workerTag }}
+
+      - name: Archive oci artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: oci-tar
+          path: image.tar
+          if-no-files-found: ${{ (inputs.push && 'ignore') || 'error' }}
+          retention-days: 1

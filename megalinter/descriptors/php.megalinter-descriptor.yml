@@ -6,6 +6,8 @@ descriptor_flavors:
 file_extensions:
   - ".php"
 install:
+  build_platform_apk:
+    - gnupg
   apk:
     - gnupg
     - php81
@@ -18,7 +20,7 @@ install:
     - php81-dom
     - php81-simplexml
     - dpkg
-  dockerfile:
+  build_platform_dockerfile:
     - |
       RUN GITHUB_AUTH_TOKEN="$(cat /run/secrets/GITHUB_TOKEN)" \
           && export GITHUB_AUTH_TOKEN \
@@ -32,8 +34,10 @@ install:
           && gpg --verify phive.phar.asc phive.phar \
           && chmod +x phive.phar \
           && mv phive.phar /usr/local/bin/phive \
-          && rm phive.phar.asc \
-          && update-alternatives --install /usr/bin/php php /usr/bin/php81 110
+          && rm phive.phar.asc
+  dockerfile:
+    - COPY --link --from=build-platform /usr/local/bin/phive /usr/local/bin/phive
+    - RUN update-alternatives --install /usr/bin/php php /usr/bin/php81 110
 supported_platforms:
   platform:
     - linux/amd64
@@ -106,8 +110,7 @@ linters:
     install:
       dockerfile:
         - FROM ghcr.io/phpstan/phpstan:latest-php8.1 as phpstan
-        - COPY --link --from=phpstan /composer/vendor/phpstan/phpstan/phpstan.phar /usr/bin/phpstan
-        - RUN chmod +x /usr/bin/phpstan
+        - COPY --link --chmod=755 --from=phpstan /composer/vendor/phpstan/phpstan/phpstan.phar /usr/bin/phpstan
       idea:
         - name: PHPStan / Psalm / Generics
           url: https://plugins.jetbrains.com/plugin/12754-phpstan--psalm--generics

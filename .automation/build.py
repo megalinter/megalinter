@@ -69,7 +69,6 @@ if IS_LATEST is True:
 else:
     VERSION_URL_SEGMENT = VERSION
 
-
 MKDOCS_URL_ROOT = ML_DOC_URL_BASE + VERSION_URL_SEGMENT
 
 BRANCH = "main"
@@ -266,8 +265,7 @@ branding:
             file.write(action_yml)
             logging.info(f"Updated {flavor_action_yml}")
     extra_lines = [
-        "COPY entrypoint.sh /entrypoint.sh",
-        "RUN chmod +x entrypoint.sh",
+        "COPY --chmod=755 entrypoint.sh /entrypoint.sh",
         'ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]',
     ]
     build_dockerfile(
@@ -295,14 +293,22 @@ def build_dockerfile(
     docker_arg = []
     docker_copy = []
     docker_other = []
+    docker_build_platform_other = []
     all_dockerfile_items = []
+    all_build_platform_dockerfile_items = []
     apk_packages = DEFAULT_DOCKERFILE_APK_PACKAGES.copy()
+    apk_build_platform_packages = []
+    apk_npm_packages = []
     npm_packages = []
     pip_packages = []
     pipvenv_packages = {}
     gem_packages = []
     cargo_packages = [] if "cargo" not in extra_packages else extra_packages["cargo"]
     is_docker_other_run = False
+    is_docker_build_platform_other_run = False
+    has_npm_copy = False
+    venv_builddeps_command = []
+    venv_apk_builddeps = ["gcc", "libffi-dev", "musl-dev", "make", "curl", "openssl-dev"]
     # Manage docker
     if requires_docker is True:
         apk_packages += ["docker", "openrc"]
@@ -314,9 +320,72 @@ def build_dockerfile(
         if "install" not in item:
             item["install"] = {}
         # Collect Dockerfile items
+        if "build_platform_dockerfile" in item["install"]:
+            item_label = item.get("linter_name", item.get("descriptor_id", ""))
+            install_comment = f"# {item_label} installation"
+            docker_build_platform_other += [install_comment]
+            for dockerfile_item in item["install"]["build_platform_dockerfile"]:
+                # FROM
+                if (
+                    dockerfile_item in all_build_platform_dockerfile_items
+                    or dockerfile_item.replace(
+                    "RUN ", "RUN --mount=type=secret,id=GITHUB_TOKEN "
+                )
+                    in all_build_platform_dockerfile_items
+                ):
+                    dockerfile_item = (
+                        "# Next line commented because already managed by another linter\n"
+                        "# " + "\n# ".join(dockerfile_item.splitlines())
+                    )
+                    docker_build_platform_other += [dockerfile_item]
+                # RUN (standalone with GITHUB_TOKEN)
+                elif (
+                    dockerfile_item.startswith("RUN")
+                    and "GITHUB_TOKEN" in dockerfile_item
+                ):
+                    dockerfile_item_cmd = dockerfile_item.replace(
+                        "RUN ", "RUN --mount=type=secret,id=GITHUB_TOKEN "
+                    )
+                    docker_build_platform_other += [dockerfile_item_cmd]
+                    is_docker_build_platform_other_run = False
+                # RUN (start)
+                elif dockerfile_item.startswith("RUN") and is_docker_build_platform_other_run is False:
+                    docker_build_platform_other += [dockerfile_item]
+                    is_docker_build_platform_other_run = True
+                # RUN (append)
+                elif dockerfile_item.startswith("RUN") and is_docker_build_platform_other_run is True:
+                    dockerfile_item_cmd = dockerfile_item.replace("RUN", "    &&")
+                    # Add \ in previous instruction line
+                    for index, prev_instruction_line in reversed(
+                        list(enumerate(docker_build_platform_other))
+                    ):
+                        if (
+                            prev_instruction_line.strip() != ""
+                            and not prev_instruction_line.startswith("#")
+                        ):
+                            # Remove last char if \n
+                            prev_instruction_line = (
+                                prev_instruction_line
+                                if not prev_instruction_line.endswith("\n")
+                                else prev_instruction_line[:-1]
+                            )
+                            docker_build_platform_other[index] = prev_instruction_line + " \\"
+                            break
+                    docker_build_platform_other += [dockerfile_item_cmd]
+                # Other
+                else:
+                    is_docker_build_platform_other_run = False
+                    docker_build_platform_other += [dockerfile_item]
+                all_dockerfile_items += [dockerfile_item]
+            # Removing comment if no install was needed
+            if docker_build_platform_other[-1] == install_comment:
+                docker_build_platform_other.pop()
+            else:
+                docker_build_platform_other += ["#"]
         if "dockerfile" in item["install"]:
             item_label = item.get("linter_name", item.get("descriptor_id", ""))
-            docker_other += [f"# {item_label} installation"]
+            install_comment = f"# {item_label} installation"
+            docker_other += [install_comment]
             for dockerfile_item in item["install"]["dockerfile"]:
                 # FROM
                 if dockerfile_item.startswith("FROM"):
@@ -337,10 +406,6 @@ def build_dockerfile(
                             "# " + "\n# ".join(dockerfile_item.splitlines())
                         )
                     docker_copy += [dockerfile_item]
-                    docker_other += [
-                        "# Managed with "
-                        + "\n#              ".join(dockerfile_item.splitlines())
-                    ]
                 # Already used item
                 elif (
                     dockerfile_item in all_dockerfile_items
@@ -393,16 +458,35 @@ def build_dockerfile(
                     is_docker_other_run = False
                     docker_other += [dockerfile_item]
                 all_dockerfile_items += [dockerfile_item]
-            docker_other += [""]
-        # Collect python packages
+            # Removing comment if no install was needed
+            if docker_other[-1] == install_comment:
+                docker_other.pop()
+            else:
+                docker_other += ["#"]
+        # Collect apk packages
         if "apk" in item["install"]:
             apk_packages += item["install"]["apk"]
+        if "pip_apk" in item["install"]:
+            venv_apk_builddeps += item["install"]["pip_apk"]
+        if "pip_builddep" in item["install"]:
+            venv_builddeps_command += item["install"]["pip_builddep"]
+        if "build_platform_apk" in item["install"]:
+            apk_build_platform_packages += item["install"]["build_platform_apk"]
+        if "npm_apk" in item["install"]:
+            apk_npm_packages += item["install"]["npm_apk"]
         # Collect npm packages
         if "npm" in item["install"]:
             npm_packages += item["install"]["npm"]
+            if not has_npm_copy:
+                has_npm_copy = True
+                apk_npm_packages += ["npm"]
+                docker_copy += ["COPY --link --from=node_modules /node-deps /node-deps"]
         # Collect python for venvs
         if "linter_name" in item and "pip" in item["install"]:
-            pipvenv_packages[item["linter_name"]] = item["install"]["pip"]
+            pipvenv_packages[item["linter_name"]] = {
+                "pip": item["install"]["pip"],
+                "env": item["install"]["pip_builddep_env"] if "pip_builddep_env" in item["install"] else ""
+            }
         # Collect python packages
         elif "pip" in item["install"]:
             pip_packages += item["install"]["pip"]
@@ -419,31 +503,6 @@ def build_dockerfile(
     if len(gem_packages) > 0:
         apk_packages += ["ruby", "ruby-dev", "ruby-bundler", "ruby-rdoc"]
     # Replace between tags in Dockerfile
-    # Commands
-    replace_in_file(
-        dockerfile,
-        "#FROM__START",
-        "#FROM__END",
-        "\n".join(list(dict.fromkeys(docker_from))),
-    )
-    replace_in_file(
-        dockerfile,
-        "#ARG__START",
-        "#ARG__END",
-        "\n".join(list(dict.fromkeys(docker_arg))),
-    )
-    replace_in_file(
-        dockerfile,
-        "#COPY__START",
-        "#COPY__END",
-        "\n".join(docker_copy),
-    )
-    replace_in_file(
-        dockerfile,
-        "#OTHER__START",
-        "#OTHER__END",
-        "\n".join(docker_other),
-    )
     # apk packages
     apk_install_command = ""
     if len(apk_packages) > 0:
@@ -452,9 +511,70 @@ def build_dockerfile(
             + " \\\n                ".join(list(dict.fromkeys(apk_packages)))
             + " \\\n    && git config --global core.autocrlf true"
         )
+    apk_build_platform_install_command = ""
+    if len(apk_build_platform_packages) > 0:
+        apk_build_platform_install_command = (
+            "RUN apk add --update --no-cache \\\n                "
+            + " \\\n                ".join(list(dict.fromkeys(apk_build_platform_packages)))
+        )
+    apk_npm_install_command = ""
+    if len(apk_npm_packages) > 0:
+        apk_npm_install_command = (
+            "RUN apk add --update --no-cache \\\n                "
+            + " \\\n                ".join(list(dict.fromkeys(apk_npm_packages)))
+        )
+    if len(venv_apk_builddeps) > 0:
+        venv_builddeps_command = [(
+            "RUN apk add --update --no-cache \\\n                "
+            + " \\\n                ".join(list(dict.fromkeys(venv_apk_builddeps)))
+        )] + venv_builddeps_command
     replace_in_file(dockerfile, "#APK__START", "#APK__END", apk_install_command)
+    replace_in_file(dockerfile, "#BUILD_PLATFORM_APK__START", "#BUILD_PLATFORM_APK__END", apk_build_platform_install_command)
+    replace_in_file(dockerfile, "#NPM_APK__START", "#NPM_APK__END", apk_npm_install_command)
     # cargo packages
     cargo_install_command = ""
+    # Pre-building packages
+    prebuild_list = set(cargo_packages) & {"shellcheck-sarif", "sarif-fmt"}
+    cargo_packages = set(cargo_packages) - prebuild_list
+    if len(cargo_packages) > 0:
+        docker_from += [
+            "FROM --platform=$BUILDPLATFORM alpine:3 AS cargo-build\n"
+            + "WORKDIR /cargo\n"
+            + "ENV HOME=/cargo\n"
+            + "USER 0\n"
+            + "RUN --mount=type=cache,target=/var/cache/apk,id=apk-${BUILDARCH},sharing=locked  \\\n"
+            + "    apk add --update \\\n"
+            + "      gcc \\\n"
+            + "      rustup \\\n"
+            + "      bash \\\n"
+            + "      git \\\n"
+            + "      musl-dev \\\n"
+            + "      llvm \\\n"
+            + "      clang \\\n"
+            + "      curl \n"
+            + 'RUN curl --location "https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-$([[ "${TARGETARCH}" == "amd64" ]] && echo "x86_64" || echo "aarch64")-unknown-linux-musl.tgz" | tar -xzv \\\n'
+            + " && mkdir -p /cargo/.cargo/bin \\\n"
+            + " && mv cargo-binstall /cargo/.cargo/bin \\\n"
+            + " && chown -R 63425:63425 /cargo \n"
+            + "USER 63425\n"
+            + "ENV CC_aarch64_unknown_linux_musl=clang \\\n"
+            + "    AR_aarch64_unknown_linux_musl=llvm-ar \\\n"
+            + '    CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-Clink-self-contained=yes -Clinker=rust-lld" \\\n'
+            + "    CC_x86_64_unknown_linux_musl=clang \\\n"
+            + "    AR_x86_64_unknown_linux_musl=llvm-ar \\\n"
+            + '    CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-Clink-self-contained=yes -Clinker=rust-lld"\n'
+            + "ARG TARGETARCH\n"
+            + 'RUN rustup-init -y --target $([[ "${TARGETARCH}" == "amd64" ]] && echo "x86_64-unknown-linux-musl" || echo "aarch64-unknown-linux-musl")\n'
+            + "\n"
+            + "RUN --mount=type=cache,id=cargo-${TARGETARCH},sharing=locked,target=/cargo/.cargo/registry/,uid=63425 \\\n"
+            + "     . /cargo/.cargo/env \\\n"
+            + f' && cargo binstall --no-confirm --no-symlinks {" ".join(prebuild_list)} --root /tmp --target $([[ "${{TARGETARCH}}" == "amd64" ]] && echo "x86_64-unknown-linux-musl" || echo "aarch64-unknown-linux-musl") \n'
+            + "\n"
+            + "FROM scratch AS cargo\n"
+            + "COPY --link --from=cargo-build /tmp/bin/* /bin/\n"
+            + f'RUN ["/bin/' + '", "--help"]\nRUN ["/bin/'.join(prebuild_list) + '", "--help"]\n'
+        ]
+        docker_copy += [f"COPY --link --from=cargo /bin/* /usr/bin/"]
     keep_rustup = False
     if len(cargo_packages) > 0:
         rust_commands = []
@@ -512,8 +632,8 @@ def build_dockerfile(
     pip_install_command = ""
     if len(pip_packages) > 0:
         pip_install_command = (
-            "RUN PYTHONDONTWRITEBYTECODE=1 pip3 install --no-cache-dir --upgrade pip &&"
-            + " PYTHONDONTWRITEBYTECODE=1 pip3 install --no-cache-dir --upgrade \\\n          '"
+            "RUN PYTHONDONTWRITEBYTECODE=1 pip3 --disable-pip-version-check install --no-cache-dir --upgrade pip &&"
+            + " PYTHONDONTWRITEBYTECODE=1 pip3 --disable-pip-version-check install --no-cache-dir --upgrade \\\n          '"
             + "' \\\n          '".join(list(dict.fromkeys(pip_packages)))
             + "' && \\\n"
             + 'find . | grep -E "(/__pycache__$|\\.pyc$|\\.pyo$)" | xargs rm -rf && \\\n'
@@ -522,34 +642,53 @@ def build_dockerfile(
     replace_in_file(dockerfile, "#PIP__START", "#PIP__END", pip_install_command)
     # Python packages in venv
     if len(pipvenv_packages.items()) > 0:
-        pipenv_install_command = (
-            "RUN PYTHONDONTWRITEBYTECODE=1 pip3 install"
-            " --no-cache-dir --upgrade pip virtualenv \\\n"
+        pipenv_download_list = []
+        pipenv_download_command = (
+            "RUN --mount=type=cache,id=pip,sharing=locked,target=/var/cache/pip,uid=0 \\\n"
+            "    mkdir /download \\\n"
+            "    && PYTHONDONTWRITEBYTECODE=1 pip3 --disable-pip-version-check install --cache-dir=/var/cache/pip --upgrade pip crossenv wheel \\\n"
         )
-        env_path_command = 'ENV PATH="${PATH}"'
-        for pip_linter, pip_linter_packages in pipvenv_packages.items():
+        pipenv_install_command = ""
+        pipenv_path_command = 'ENV PATH="${PATH}"'
+        for pip_linter, data in pipvenv_packages.items():
+            pip_linter_packages = data["pip"]
+            pip_linter_env = data["env"]
+            pipenv_download_list += pip_linter_packages
             pipenv_install_command += (
-                f'    && mkdir -p "/venvs/{pip_linter}" '
-                + f'&& cd "/venvs/{pip_linter}" '
-                + "&& virtualenv . "
-                + "&& source bin/activate "
-                + "&& PYTHONDONTWRITEBYTECODE=1 pip3 install --no-cache-dir "
+                'RUN --mount=type=cache,id=pip,sharing=shared,target=/var/cache/pip,uid=0 \\\n'
+                f'   mkdir -p "/venvs/{pip_linter}" \\\n'
+                + f' && cd "/venvs/{pip_linter}" \\\n'
+                + " && python3 -m crossenv /usr/local/bin/target-python3 --machine $([[ \"${TARGETPLATFORM}\" == \"linux/arm64\" ]] && echo \"aarch64\" || echo \"x86_64\") . \\\n"
+                # See https://github.com/benfogle/crossenv/issues/107
+                + " && find . -type f -name _musllinux.py -exec sed -i 's|def _get_musl_version.*:|\\\\0\\\\n    return _MuslVersion(major=1, minor=2)|g' \{\} \; \\\n"
+                + " && source bin/activate \\\n"
+                + f" && PYTHONDONTWRITEBYTECODE=1 {pip_linter_env} pip3 --disable-pip-version-check install --find-links=/download --cache-dir=/var/cache/pip "
                 + (" ".join(pip_linter_packages))
-                + " "
-                + "&& deactivate "
-                + "&& cd ./../.. \\\n"
+                + "\\n"
             )
-            env_path_command += f":/venvs/{pip_linter}/bin"
-        pipenv_install_command = pipenv_install_command[:-2]  # remove last \
-        pipenv_install_command += (
-            ' \\\n    && find . | grep -E "(/__pycache__$|\\.pyc$|\\.pyo$)" | xargs rm -rf '
-            + "&& rm -rf /root/.cache\n"
-            + env_path_command
+            pipenv_path_command += f":/venvs/{pip_linter}/cross/bin"
+        pipenv_download_command += (
+            '&& pip download --cache-dir=/var/cache/pip --dest "/download" \\\n      '
+            + (" \\\n      ".join(pipenv_download_list))
+            + " \\\n"
         )
+        pipenv_download_command = pipenv_download_command[:-2]  # remove last \
+        pipenv_download_command += "\n"
     else:
         pipenv_install_command = ""
+        pipenv_download_command = ""
+        pipenv_path_command = ""
     replace_in_file(
         dockerfile, "#PIPVENV__START", "#PIPVENV__END", pipenv_install_command
+    )
+    replace_in_file(
+        dockerfile, "#PIPVENV_DOWNLOAD__START", "#PIPVENV_DOWNLOAD__END", pipenv_download_command
+    )
+    replace_in_file(
+        dockerfile, "#PIPVENV_BUILDDEPS__START", "#PIPVENV_BUILDDEPS__END", "\\n".join(venv_builddeps_command)
+    )
+    replace_in_file(
+        dockerfile, "#PIPVENV_PATH__START", "#PIPVENV_PATH__END", pipenv_path_command
     )
 
     # Ruby gem packages
@@ -561,6 +700,37 @@ def build_dockerfile(
             + " \\\n          ".join(list(dict.fromkeys(gem_packages)))
         )
     replace_in_file(dockerfile, "#GEM__START", "#GEM__END", gem_install_command)
+    # Commands
+    replace_in_file(
+        dockerfile,
+        "#FROM__START",
+        "#FROM__END",
+        "\n".join(list(dict.fromkeys(docker_from))),
+    )
+    replace_in_file(
+        dockerfile,
+        "#ARG__START",
+        "#ARG__END",
+        "\n".join(list(dict.fromkeys(docker_arg))),
+    )
+    replace_in_file(
+        dockerfile,
+        "#COPY__START",
+        "#COPY__END",
+        "\n".join(docker_copy),
+    )
+    replace_in_file(
+        dockerfile,
+        "#OTHER__START",
+        "#OTHER__END",
+        "\n".join(docker_other),
+    )
+    replace_in_file(
+        dockerfile,
+        "#BUILD_PLATFORM_OTHER__START",
+        "#BUILD_PLATFORM_OTHER__END",
+        "\n".join(docker_build_platform_other),
+    )
     flavor_env = f"ENV MEGALINTER_FLAVOR={flavor}"
     replace_in_file(dockerfile, "#FLAVOR__START", "#FLAVOR__END", flavor_env)
     replace_in_file(
@@ -1441,12 +1611,12 @@ def process_type(linters_by_type, type1, type_label, linters_tables_md):
         # Pre/post commands & unsecured variables
         linter_doc_md += [
             f"| {linter.name}_PRE_COMMANDS | List of bash commands to run before the linter"
-            f"| {dump_as_json(linter.pre_commands,'None')} |",
+            f"| {dump_as_json(linter.pre_commands, 'None')} |",
             f"| {linter.name}_POST_COMMANDS | List of bash commands to run after the linter"
             f"| {dump_as_json(linter.post_commands,'None')} |",
             f"| {linter.name}_UNSECURED_ENV_VARIABLES  | List of env variables explicitly "
             + f"not filtered before calling {linter.name} and its pre/post commands"
-            f"| {dump_as_json(linter.post_commands,'None')} |",
+            f"| {dump_as_json(linter.post_commands, 'None')} |",
         ]
         add_in_config_schema_file(
             [
@@ -2484,7 +2654,7 @@ def finalize_doc_build():
 [![GitHub stars](https://img.shields.io/github/stars/oxsecurity/megalinter?cacheSeconds=3600&color=%23FD80CD)](https://github.com/oxsecurity/megalinter/stargazers/)
 [![Dependents](https://img.shields.io/static/v1?label=Used%20by&message=2180&color=%23FD80CD&logo=slickpic)](https://github.com/oxsecurity/megalinter/network/dependents)
 [![GitHub contributors](https://img.shields.io/github/contributors/oxsecurity/megalinter.svg?color=%23FD80CD)](https://github.com/oxsecurity/megalinter/graphs/contributors/)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square&color=%23FD80CD)](http://makeapullrequest.com)""",  # noqa: E501
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square&color=%23FD80CD)](http://makeapullrequest.com)""", # noqa: E501
     )
 
     # Remove TOC in target file
@@ -3239,7 +3409,7 @@ def update_workflow_linters(file_path, linters):
         file_content = f.read()
         file_content = re.sub(
             r"(linter:\s+\[\s*)([^\[\]]*?)(\s*\])",
-            rf"\1{re.escape(linters).replace(chr(92),'').strip()}\3",
+            rf"\1{re.escape(linters).replace(chr(92), '').strip()}\3",
             file_content,
         )
 
