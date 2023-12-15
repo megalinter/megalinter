@@ -211,6 +211,7 @@ Note: Can be used with `oxsecurity/megalinter@beta` in your GitHub Action mega-l
 - Fixes
   - build.py: Remove exclusivity between pip, gem & cargo packages
   - Salesforce linters: Switch sfdx-cli to @salesforce/cli
+  - Set default permissions to all workflows to `read-all` to increase security and prevent Checkov `CKV2_GHA_1` errors, by @andrewvaughan in [#3032](https://github.com/oxsecurity/megalinter/pull/3032)
   - Fixed issue with `actionlint` throwing an error on `if` statements in the generated workflow file
   - Added default `.devskim.json` to mitigate errors introduced when no config exists
 
@@ -218,6 +219,7 @@ Note: Can be used with `oxsecurity/megalinter@beta` in your GitHub Action mega-l
   - Display list of articles from newest to oldest
   - Fix incorrect environment variable in djlint docs
   - Improve lychee documentation to add an example of `.lycheeignore`
+  - Improved commenting in `.mega-linter.yml` file to help new users configure the GitHub workflow more effectively
 
 - CI
   - Add the other maintainers globally to the CODEOWNERS file ([#3008](https://github.com/oxsecurity/megalinter/pull/3008))
