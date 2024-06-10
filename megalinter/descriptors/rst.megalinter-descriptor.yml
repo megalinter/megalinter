@@ -18,6 +18,10 @@ linters:
       pip:
         - Pygments
         - restructuredtext_lint
+    supported_platforms:
+      platform:
+        - linux/amd64
+        - linux/arm64
   # rstcheck
   - linter_name: rstcheck
     linter_url: https://github.com/myint/rstcheck
@@ -34,6 +38,10 @@ linters:
     install:
       pip:
         - rstcheck[toml,sphinx]
+    supported_platforms:
+      platform:
+        - linux/amd64
+        - linux/arm64
     ide:
       vscode:
         - name: vscode-restructuredtext
@@ -56,3 +64,7 @@ linters:
       pip:
         - rstfmt
     version_extract_regex: "(?<=rstfmt )\\d+(\\.\\d+)+"
+    supported_platforms:
+      platform:
+        - linux/amd64
+        - linux/arm64

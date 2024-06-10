@@ -22,6 +22,10 @@ linters:
     install:
       npm:
         - sql-lint
+    supported_platforms:
+      platform:
+        - linux/amd64
+        - linux/arm64
     ide:
       vim:
         - name: ale
@@ -51,6 +55,10 @@ linters:
     install:
       pip:
         - sqlfluff
+    supported_platforms:
+      platform:
+        - linux/amd64
+        - linux/arm64
   # TSQL
   - class: DotNetToolLinter
     linter_name: tsqllint
@@ -80,6 +88,10 @@ linters:
         - RUN apk add --no-cache dotnet8-sdk --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community
         - ENV PATH="${PATH}:/root/.dotnet/tools"
         - RUN dotnet tool install --global TSQLLint
+    supported_platforms:
+      platform:
+        - linux/amd64
+        - linux/arm64
     ide:
       vscode:
         - name: TSQL Lint

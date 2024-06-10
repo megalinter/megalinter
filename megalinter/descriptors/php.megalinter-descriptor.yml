@@ -39,6 +39,10 @@ install:
           && update-alternatives --install /usr/bin/php php /usr/bin/php83 110
     - COPY --from=composer/composer:2-bin /composer /usr/bin/composer
     - ENV PATH="/root/.composer/vendor/bin:${PATH}"
+supported_platforms:
+  platform:
+    - linux/amd64
+    - linux/arm64
 linters:
   # PHPCS
   - linter_name: phpcs
@@ -65,6 +69,10 @@ linters:
       dockerfile:
         - |
           RUN GITHUB_AUTH_TOKEN="$(cat /run/secrets/GITHUB_TOKEN)" && export GITHUB_AUTH_TOKEN && composer global require squizlabs/php_codesniffer bartlett/sarif-php-sdk
+    supported_platforms:
+      platform:
+        - linux/amd64
+        - linux/arm64
     ide:
       atom:
         - name: linter-phpcs
@@ -117,6 +125,10 @@ linters:
       vscode:
         - name: vscode-phpstan
           url: https://marketplace.visualstudio.com/items?itemName=calsmurf2904.vscode-phpstan
+    supported_platforms:
+      platform:
+        - linux/amd64
+        - linux/arm64
   # PSALM
   - linter_name: psalm
     name: PHP_PSALM
@@ -146,6 +158,10 @@ linters:
       dockerfile:
         - |
           RUN GITHUB_AUTH_TOKEN="$(cat /run/secrets/GITHUB_TOKEN)" && export GITHUB_AUTH_TOKEN && phive --no-progress install psalm -g --trust-gpg-keys 8A03EA3B385DBAA1,12CE0F1D262429A5
+    supported_platforms:
+      platform:
+        - linux/amd64
+        - linux/arm64
     ide:
       idea:
         - name: PHPStan / Psalm / Generics
@@ -172,6 +188,10 @@ linters:
       dockerfile:
         - |
           RUN GITHUB_AUTH_TOKEN="$(cat /run/secrets/GITHUB_TOKEN)" && export GITHUB_AUTH_TOKEN && phive --no-progress install overtrue/phplint --force-accept-unsigned -g
+    supported_platforms:
+      platform:
+        - linux/amd64
+        - linux/arm64
   # PHP-CS-Fixer
   - linter_name: php-cs-fixer
     name: PHP_PHPCSFIXER

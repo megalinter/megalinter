@@ -45,6 +45,10 @@ linters:
         - ENV JAVA_HOME_17=/usr/lib/jvm/java-17-openjdk
       npm:
         - npm-groovy-lint
+    supported_platforms:
+      platform:
+        - linux/amd64
+        - linux/arm64
     ide:
       vscode:
         - name: VSCode Groovy Lint

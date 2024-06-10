@@ -32,6 +32,10 @@ linters:
     install:
       npm:
         - "prettier"
+    supported_platforms:
+      platform:
+        - linux/amd64
+        - linux/arm64
     ide:
       atom:
         - name: prettier-atom
@@ -83,6 +87,10 @@ linters:
     install:
       pip:
         - yamllint
+    supported_platforms:
+      platform:
+        - linux/amd64
+        - linux/arm64
     ide:
       emacs:
         - name: flycheck
@@ -111,6 +119,10 @@ linters:
     install:
       npm:
         - v8r
+    supported_platforms:
+      platform:
+        - linux/amd64
+        - linux/arm64
     ide:
       eclipse:
         - name: native support
