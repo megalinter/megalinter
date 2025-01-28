@@ -80,7 +80,7 @@ FROM python:3.12.8-alpine3.21
 #############################################################################################
 #ARG__START
 # renovate: datasource=github-tags depName=kubescape/kubescape
-ARG KUBERNETES_KUBESCAPE_VERSION=2.9.0
+ARG KUBERNETES_KUBESCAPE_VERSION=2.9.2
 # renovate: datasource=nuget depName=Microsoft.CST.DevSkim.CLI
 ARG REPOSITORY_DEVSKIM_VERSION=1.0.51
 # renovate: datasource=github-tags depName=anchore/grype
