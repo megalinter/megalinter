@@ -107,7 +107,7 @@ ARG DETEKT_VERSION=1.23.7
 # renovate: datasource=github-tags depName=kubescape/kubescape
 ARG KUBERNETES_KUBESCAPE_VERSION=2.9.0
 # renovate: datasource=npm depName=markdown-link-check
-ARG MARKDOWN_MARKDOWN_LINK_CHECK_VERSION=3.12.2
+ARG MARKDOWN_MARKDOWN_LINK_CHECK_VERSION=3.13.6
 # renovate: datasource=nuget depName=PSScriptAnalyzer registryUrl=https://www.powershellgallery.com/api/v2/
 ARG PSSA_VERSION='1.23.0'
 
