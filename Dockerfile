@@ -159,7 +159,7 @@ ARG LUA_SELENE_VERSION=0.28.0
 # renovate: datasource=crate depName=stylua
 ARG LUA_STYLUA_VERSION=2.0.0
 # renovate: datasource=npm depName=markdown-link-check
-ARG MARKDOWN_MARKDOWN_LINK_CHECK_VERSION=3.12.2
+ARG MARKDOWN_MARKDOWN_LINK_CHECK_VERSION=3.13.6
 # renovate: datasource=github-tags depName=skaji/cpm
 ARG PERL_PERLCRITIC_VERSION=0.997021
 
